@@ -120,7 +120,7 @@ void push_back(const T& x) {
 `push_back()`的动态拓展借由`insert_aux()`完成，一个事实是vector的每一次拓展内存都将会发生大量的数据拷贝和析构。
 
 ```c++
-// gcc stl_vector.h
+// gcc gcc/libstdc++-v3/include/bits/stl_vector.h
 // Called by _M_fill_insert, _M_insert_aux etc.
 size_type _M_check_len(size_type __n, const char* __s) const {
     if (max_size() - size() < __n)
@@ -135,7 +135,7 @@ pointer _M_allocate(size_t __n) {
     return __n != 0 ? _Tr::allocate(_M_impl, __n) : pointer();
 }
 
-// gcc 13 vector.tcc
+// gcc 13 gcc/libstdc++-v3/include/bits/vector.tcc
 template<typename _Tp, typename _Alloc>
 void vector<_Tp, _Alloc>::_M_realloc_insert(iterator __position, const _Tp& __x) {
     const size_type __len = _M_check_len(size_type(1), "vector::_M_realloc_insert");      // 2倍当前大小
@@ -188,14 +188,122 @@ GCC 13的实现和GCC 2.9没有太大区别，基本是由于分配器和设计�
 
 ### GCC 2.9
 
-在GCC 2.9的实现中`std::vector<T>::iterator`的类型实际是`T*`，这是因为对于续内存空间的访问，可以直接使用指针，在`iterator_traints`时将使用指针类型的特化。
+在GCC 2.9的实现中`std::vector<T>::iterator`的类型实际是`T*`，这是因为对于续内存空间的访问，可以直接使用指针，在`iterator_traints`时将使用指针类型的特化：
+
+```c++
+// gcc 2.9 stl_iterator_base_types.h
+/// Partial specialization for pointer types.
+  template<typename _Tp>
+    struct iterator_traits<_Tp*>
+    {
+      typedef random_access_iterator_tag iterator_category;
+      typedef _Tp                         value_type;
+      typedef ptrdiff_t                   difference_type;
+      typedef _Tp*                        pointer;
+      typedef _Tp&                        reference;
+    };
+```
 
 ### GCC 4.9
 
 ```c++
+// gcc 4.9 gcc/libstdc++-v3/include/bits/stl_iterator.h
+  template<typename _Iterator, typename _Container>
+    class __normal_iterator
+    {
+    protected:
+      _Iterator _M_current;
+
+      typedef iterator_traits<_Iterator>		__traits_type;
+
+    public:
+      typedef _Iterator					iterator_type;
+      typedef typename __traits_type::iterator_category iterator_category;
+      typedef typename __traits_type::value_type  	value_type;
+      typedef typename __traits_type::difference_type 	difference_type;
+      typedef typename __traits_type::reference 	reference;
+      typedef typename __traits_type::pointer   	pointer;
+      ...
+    }
+
+// gcc 4.9 gcc/libstdc++-v3/include/bits/allocator.h
+  template<typename _Tp>
+    class allocator: public __allocator_base<_Tp>
+    {
+   public:
+      typedef size_t     size_type;
+      typedef ptrdiff_t  difference_type;
+      typedef _Tp*       pointer;
+      typedef const _Tp* const_pointer;
+      typedef _Tp&       reference;
+      typedef const _Tp& const_reference;
+      typedef _Tp        value_type;
+      ...
+      template<typename _Tp1>
+        struct rebind
+        { typedef allocator<_Tp1> other; };
+    }
+
+// gcc 4.9 gcc/libstdc++-v3/include/bits/alloc_traits.h
+  template<typename _Alloc, typename _Tp>
+    struct __alloctr_rebind<_Alloc, _Tp, true>
+    {
+      typedef typename _Alloc::template rebind<_Tp>::other __type;
+    };
+
+  template<typename _Alloc>
+    struct allocator_traits
+    {
+      /// The allocator type
+      typedef _Alloc allocator_type;
+      /// The allocated type
+      typedef typename _Alloc::value_type value_type;
+#define _GLIBCXX_ALLOC_TR_NESTED_TYPE(_NTYPE, _ALT) \
+  private: \
+  template<typename _Tp> \
+    static typename _Tp::_NTYPE _S_##_NTYPE##_helper(_Tp*); \
+  static _ALT _S_##_NTYPE##_helper(...); \
+    typedef decltype(_S_##_NTYPE##_helper((_Alloc*)0)) __##_NTYPE; \
+  public:
+
+_GLIBCXX_ALLOC_TR_NESTED_TYPE(pointer, value_type*)
+      /**
+       * @brief   The allocator's pointer type.
+       *
+       * @c Alloc::pointer if that type exists, otherwise @c value_type*
+      */
+      typedef __pointer pointer;
+      ...
+      template<typename _Tp>
+	using rebind_alloc = typename __alloctr_rebind<_Alloc, _Tp>::__type;
+    }
+
+// gcc 4.9 gcc/libstdc++-v3/include/ext/alloc_traits.h
+template<typename _Alloc>
+  struct __alloc_traits
+#if __cplusplus >= 201103L
+  : std::allocator_traits<_Alloc>
+#endif
+  {
+    typedef _Alloc allocator_type;
+#if __cplusplus >= 201103L
+    typedef std::allocator_traits<_Alloc>           _Base_type;
+    typedef typename _Base_type::value_type         value_type;
+    typedef typename _Base_type::pointer            pointer;
+    typedef typename _Base_type::const_pointer      const_pointer;
+    typedef typename _Base_type::size_type          size_type;
+    typedef typename _Base_type::difference_type    difference_type;
+    // C++11 allocators do not define reference or const_reference
+    typedef value_type&                             reference;
+    typedef const value_type&                       const_reference;
+    ...
+    template<typename _Tp>
+      struct rebind
+      { typedef typename _Base_type::template rebind_alloc<_Tp> other; };
+  }
 
 
-// gcc 4.9 stl_vector.h
+// gcc 4.9 gcc/libstdc++-v3/include/bits/stl_vector.h
   template<typename _Tp, typename _Alloc>
     struct _Vector_base
     {
@@ -218,7 +326,32 @@ GCC 13的实现和GCC 2.9没有太大区别，基本是由于分配器和设计�
 	
 ```
 
+从`std::vector`开始追踪，可以先看到`__normal_iterator`中只有一个`_Iterator`也就是`pointer`类型的数据成员`_M_current`，然后回溯`pointer`可以知道它其实是`_Tp*`，所以`std::vector<T>::iterator`实际就是`T*`。回溯的过程涉及到分配器的特化，实际最后会追溯到`std::allocator`类。
 
+整个rebind的过程比较复杂，上面的代码列出了C++11的核心部分（C++98比较简单，直接就可以追溯到`std::allocator`），`_Tp_alloc_type`实际就是`std::allocator<_Tp>`。
+
+唯一困惑的地方就是`allocator_traits`中`__pointer`的定义，这里使用了宏定义判断，根据GCC 13新的实现（在2015年宏定义被改为detection idiom）：
+
+```c++
+    template<typename _Tp>
+      using __pointer = typename _Tp::pointer;
+
+	  /**
+       * @brief   The allocator's pointer type.
+       *
+       * @c Alloc::pointer if that type exists, otherwise @c value_type*
+      */
+      using pointer = __detected_or_t<value_type*, __pointer, _Alloc>;
+```
+
+和注释我的理解如下：
+
+- 假如`Alloc::pointer`存在的话，使用`Alloc::pointer`
+- 假如`Alloc::poniter`不存在的话，使用`value_type*`
+
+实际上无论哪种情况这个`pointer`都是`_Tp*`。
+
+GCC 13的实现相对GCC 4.9只是增加了新的C++标准的使用，核心没有改动。如前文所说，这种改进实际是没有必要的。区别在于，GCC 2.9的vector的iterator是pointer iterator，而在GCC 4.9之后，vecotr的iterator和其他容器一样变为了一个对象，于是在进行`iterator_traits`的时候会走class iterator而不是GCC 2.9的pointer iterator，但实际上我们可以看到`__normal_iterator`中的`iterator_traits`实际还是pointer iterator的traits，可以理解为新版给旧版的`_Tp*`外面封装了一个iterator adapter，使它能支持容器需要的5个associated types。
 
 ## 内存分布
 
