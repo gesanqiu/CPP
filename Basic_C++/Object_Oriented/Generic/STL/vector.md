@@ -43,7 +43,7 @@ std::vector与其他容器不同的地方在于作为使用连续空间的Contai
 
 ## std::vector in GCC 4.9
 
-![std__vector-GCC4.9](images/std__vector-GCC4.9.png)
+![std__vector-GCC4.9](images/vector/std__vector-GCC4.9.png)
 
 GCC 4.9中大部分容器都采用了handle-body的设计，用于封装隐藏实现，Container类继承自Base类，Base类含有一个Implementation对象，所有操作都由Implementation类的成员完成。事实上核心并没有变化，只是修改了实现的设计。
 
@@ -51,7 +51,7 @@ GCC 4.9中大部分容器都采用了handle-body的设计，用于封装隐藏�
 
 ## std::vector in GCC 13
 
-![std__vector-GCC13](images/std__vector-GCC13.png)
+![std__vector-GCC13](images/vector/std__vector-GCC13.png)
 
 GCC 13和GCC 4.9的实现没有太大区别，只是将Implementation类的数据部分单独抽象，并改成了多继承。
 
@@ -61,7 +61,7 @@ GCC 13和GCC 4.9的实现没有太大区别，只是将Implementation类的数�
 
 ## 动态拓展：二倍增长
 
-![std__vector-memory block](images/std__vector-memory block.png)
+![std__vector-memory block](images/vector/std__vector-memory block.png)
 
 上图展示了一个capacity为8，size为6的std::vector对象在插入第九个元素时发生的reallocation过程，当需要拓展内存时，std::vector对象的分配器将找一块能存下两倍大小的内存，并将旧数据拷贝到新内存地址，然后再插入新元素，加入无法找到两倍大的新内存，那么这个对象生命周期将会终止。
 
@@ -97,7 +97,7 @@ void vector<T, Alloc>::insert_aux(iterator position, const T& x) {
         throw;
         }
 
-		// 回收旧vector对象占用内存
+		// 回收vector对象占用的旧内存
         destroy(begin(), end());
         deallocate();
         // 修改指针
@@ -395,6 +395,6 @@ int main()
 }
 ```
 
-![Screenshot from 2021-10-09 15-52-19](images/Screenshot from 2021-10-09 15-52-19.png)
+![Screenshot from 2021-10-09 15-52-19](images/vector/Screenshot from 2021-10-09 15-52-19.png)
 
 从上文可以知道`std::vector`的数据成员是三个指针，在64为系统中占用24字节，使用gdb查看vector对象的24个字节中的数据可以发现它们确实对应了`_M_start`，`_M_finish`，`_M_end_of_storage`三个指针的地址，打印指针的地址即可以访问到vector对象中的数据元素。此外还可以看到在内存发生动态拓展时内存确实是重新分配了。
