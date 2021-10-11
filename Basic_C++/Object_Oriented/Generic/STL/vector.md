@@ -63,7 +63,7 @@ GCC 13和GCC 4.9的实现没有太大区别，只是将Implementation类的数�
 
 ![std__vector-memory block](images/vector/std__vector-memory block.png)
 
-上图展示了一个capacity为8，size为6的std::vector对象在插入第九个元素时发生的reallocation过程，当需要拓展内存时，std::vector对象的分配器将找一块能存下两倍大小的内存，并将旧数据拷贝到新内存地址，然后再插入新元素，加入无法找到两倍大的新内存，那么这个对象生命周期将会终止。
+上图展示了一个capacity为8，size为6的std::vector对象在插入第九个元素时发生的reallocation过程，当需要拓展内存时，std::vector对象的分配器将找一块能存下两倍大小的内存，并将旧数据拷贝到新内存地址，然后再插入新元素，假如无法找到两倍大的新内存，那么这个对象生命周期将会终止。
 
 ```c++
 // gcc 2.9 stl_vector.h
@@ -120,7 +120,7 @@ void push_back(const T& x) {
 `push_back()`的动态拓展借由`insert_aux()`完成，一个事实是vector的每一次拓展内存都将会发生大量的数据拷贝和析构。
 
 ```c++
-// gcc gcc/libstdc++-v3/include/bits/stl_vector.h
+// gcc 13 gcc/libstdc++-v3/include/bits/stl_vector.h
 // Called by _M_fill_insert, _M_insert_aux etc.
 size_type _M_check_len(size_type __n, const char* __s) const {
     if (max_size() - size() < __n)
@@ -328,9 +328,9 @@ template<typename _Alloc>
 
 从`std::vector`开始追踪，可以先看到`__normal_iterator`中只有一个`_Iterator`也就是`pointer`类型的数据成员`_M_current`，然后回溯`pointer`可以知道它其实是`_Tp*`，所以`std::vector<T>::iterator`实际就是`T*`。回溯的过程涉及到分配器的特化，实际最后会追溯到`std::allocator`类。
 
-整个rebind的过程比较复杂，上面的代码列出了C++11的核心部分（C++98比较简单，直接就可以追溯到`std::allocator`），`_Tp_alloc_type`实际就是`std::allocator<_Tp>`。
+整个rebind的过程比较复杂，上面的代码列出了C++11的核心部分（C++98比较简单，`__gnu_cxx::alloc_traits<_Alloc>`直接就可以追溯到`std::allocator`类），`_Tp_alloc_type`实际就是`std::allocator<_Tp>`。
 
-唯一困惑的地方就是`allocator_traits`中`__pointer`的定义，这里使用了宏定义判断，根据GCC 13新的实现（在2015年宏定义被改为detection idiom）：
+唯一困惑的地方就是`allocator_traits`中`__pointer`的定义，这里使用了宏定义判断，根据GCC 13新的实现（在2015年GCC 4.9的宏定义被改为detection idiom）：
 
 ```c++
     template<typename _Tp>
@@ -398,3 +398,4 @@ int main()
 ![Screenshot from 2021-10-09 15-52-19](images/vector/Screenshot from 2021-10-09 15-52-19.png)
 
 从上文可以知道`std::vector`的数据成员是三个指针，在64为系统中占用24字节，使用gdb查看vector对象的24个字节中的数据可以发现它们确实对应了`_M_start`，`_M_finish`，`_M_end_of_storage`三个指针的地址，打印指针的地址即可以访问到vector对象中的数据元素。此外还可以看到在内存发生动态拓展时内存确实是重新分配了。
+
