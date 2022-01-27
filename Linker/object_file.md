@@ -130,3 +130,142 @@ Key to Flags:
 - 当系统中运行着多个程序的副本时，指令是可以共用的，而数据是私有的，分离式的设计能够节约指令部分的空间。
 
 ## 挖掘SimpleSection.o
+
+```shell
+ts@ts-OptiPlex-7070:~/Downloads/test$ readelf -h SimpleSection.o
+ELF Header:
+  Magic:   7f 45 4c 46 02 01 01 00 00 00 00 00 00 00 00 00 
+  Class:                             ELF64
+  Data:                              2's complement, little endian
+  Version:                           1 (current)
+  OS/ABI:                            UNIX - System V
+  ABI Version:                       0
+  Type:                              REL (Relocatable file)
+  Machine:                           Advanced Micro Devices X86-64
+  Version:                           0x1
+  Entry point address:               0x0
+  Start of program headers:          0 (bytes into file)
+  Start of section headers:          1064 (bytes into file)
+  Flags:                             0x0
+  Size of this header:               64 (bytes)
+  Size of program headers:           0 (bytes)
+  Number of program headers:         0
+  Size of section headers:           64 (bytes)
+  Number of section headers:         13
+  Section header string table index: 10
+ts@ts-OptiPlex-7070:~/Downloads/test$ readelf -S SimpleSection.o
+There are 13 section headers, starting at offset 0x428:
+
+Section Headers:
+  [Nr] Name              Type             Address           Offset
+       Size              EntSize          Flags  Link  Info  Align
+  [ 0]                   NULL             0000000000000000  00000000
+       0000000000000000  0000000000000000           0     0     0
+  [ 1] .text             PROGBITS         0000000000000000  00000040
+       0000000000000053  0000000000000000  AX       0     0     1
+  [ 2] .rela.text        RELA             0000000000000000  00000318
+       0000000000000078  0000000000000018   I      11     1     8
+  [ 3] .data             PROGBITS         0000000000000000  00000094
+       0000000000000008  0000000000000000  WA       0     0     4
+  [ 4] .bss              NOBITS           0000000000000000  0000009c
+       0000000000000004  0000000000000000  WA       0     0     4
+  [ 5] .rodata           PROGBITS         0000000000000000  0000009c
+       0000000000000004  0000000000000000   A       0     0     1
+  [ 6] .comment          PROGBITS         0000000000000000  000000a0
+       0000000000000036  0000000000000001  MS       0     0     1
+  [ 7] .note.GNU-stack   PROGBITS         0000000000000000  000000d6
+       0000000000000000  0000000000000000           0     0     1
+  [ 8] .eh_frame         PROGBITS         0000000000000000  000000d8
+       0000000000000058  0000000000000000   A       0     0     8
+  [ 9] .rela.eh_frame    RELA             0000000000000000  00000390
+       0000000000000030  0000000000000018   I      11     8     8
+  [10] .shstrtab         STRTAB           0000000000000000  000003c0
+       0000000000000061  0000000000000000           0     0     1
+  [11] .symtab           SYMTAB           0000000000000000  00000130
+       0000000000000180  0000000000000018          12    11     8
+  [12] .strtab           STRTAB           0000000000000000  000002b0
+       0000000000000066  0000000000000000           0     0     1
+Key to Flags:
+  W (write), A (alloc), X (execute), M (merge), S (strings), l (large)
+  I (info), L (link order), G (group), T (TLS), E (exclude), x (unknown)
+  O (extra OS processing required) o (OS specific), p (processor specific)
+
+```
+
+### 文件头
+
+`readelf -h`的输出为ELF Header信息，定义了ELF魔术、文件机器字节长度、数据存储方式、版本、运行平台、ABI版本、ELF重定位类型、硬件平台、硬件平台版本、入口地址、程序头入口和长度、段表的位置和长度及段的数量等。ELF Header结构被定义在`/usr/include/elf.h`中，其中的变量分别对应了上述输出的一条信息，具体可以自行研究，假如不深究细节，readelf输出的信息已经足够用于分析ELF文件结构。
+
+### 段表
+
+根据ELF Header的信息，SimpleSection.o有13个段，段表就是记录这些段的基本属性的结构，例如段名、段的长度、在文件中的偏移以及其他属性。
+
+从ELF Header可以看出段表的在SImpleSection.o中的偏移为`0x428`，段表中每个段的长度为64 bytes，总共有13个段，也即Section Table的大小为832bytes，加上offset等于1896 bytes，也即SimpleSection.o的大小。
+
+段表的结构比较简单，是一个`Elf_64Shdr`结构体数组，数组个数等于段的个数，每个数组元素对应一个段。
+
+注：ELF段表的第一个段永远是无效的段描述符，类型为`NULL`。
+
+
+
+### 数据段和只读数据段
+
+```shell
+ts@ts-OptiPlex-7070:~/Downloads/test$ objdump -s -d SimpleSection.o 
+...
+# 16进制输出
+Contents of section .data:
+ 0000 54000000 55000000                    T...U...        
+Contents of section .rodata:
+ 0000 25640a00                             %d..            
+...
+```
+
+`.data`段保存的是已经初始化了的全局静态变量和局部静态变量，即`global_init_varabal`和`static_var`，共8个字节，`.data`中的输出为`0x0054`和`0x0055`正好对应了这两个变量的值84和85。
+
+`.rodata`段存放的是只读数据，一般是程序里的只读变量和字符串常量，在SimpleSection.c的func1中调用printf是用到了一个字符串常量`%d\n`，对应的16进制ascii码为`0x25`，`0x64`，`0x0a`，最后以`0x00`即`\0`结尾。
+
+### BSS段
+
+`.bss`段存放的是未初始化的全局变量和局部静态变量，即`global_uninit_var`和`static_var2`，但是我们可以看到`.bss`段的size为4字节而不是8字节，这是因为某系编译器只为未定义的全局变量预留一个符号，等待最终链接成可执行文件的时候再在`.bss`段分配空间，因此更准确的说法是`.bss`段为这两个变量预留了空间。
+
+### 代码段
+
+```shell
+ts@ts-OptiPlex-7070:~/Downloads/test$ objdump -s -d SimpleSection.o 
+# 忽略各段的16进制输出
+# 只关注代码段的汇编代码
+Disassembly of section .text:
+
+0000000000000000 <func1>:
+   0:	55                   	push   %rbp
+   1:	48 89 e5             	mov    %rsp,%rbp
+   4:	48 83 ec 10          	sub    $0x10,%rsp
+   8:	89 7d fc             	mov    %edi,-0x4(%rbp)
+   b:	8b 45 fc             	mov    -0x4(%rbp),%eax
+   e:	89 c6                	mov    %eax,%esi
+  10:	bf 00 00 00 00       	mov    $0x0,%edi
+  15:	b8 00 00 00 00       	mov    $0x0,%eax
+  1a:	e8 00 00 00 00       	callq  1f <func1+0x1f>
+  1f:	90                   	nop
+  20:	c9                   	leaveq 
+  21:	c3                   	retq   
+
+0000000000000022 <main>:
+  22:	55                   	push   %rbp
+  23:	48 89 e5             	mov    %rsp,%rbp
+  26:	48 83 ec 10          	sub    $0x10,%rsp
+  2a:	c7 45 f8 01 00 00 00 	movl   $0x1,-0x8(%rbp)
+  31:	8b 15 00 00 00 00    	mov    0x0(%rip),%edx        # 37 <main+0x15>
+  37:	8b 05 00 00 00 00    	mov    0x0(%rip),%eax        # 3d <main+0x1b>
+  3d:	01 d0                	add    %edx,%eax
+  3f:	8d 50 02             	lea    0x2(%rax),%edx
+  42:	8b 45 fc             	mov    -0x4(%rbp),%eax
+  45:	01 d0                	add    %edx,%eax
+  47:	89 c7                	mov    %eax,%edi
+  49:	e8 00 00 00 00       	callq  4e <main+0x2c>
+  4e:	8b 45 f8             	mov    -0x8(%rbp),%eax
+  51:	c9                   	leaveq 
+  52:	c3                   	retq 
+```
+
