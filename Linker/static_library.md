@@ -36,11 +36,62 @@ void swap(int *a, int *b)
 - 空间与地址分配：扫描所有的输入目标文件，并且获得它们的各个段的产犊、属性和位置，并且将输入目标文件中的符号表中所有的符号定义和符号收集起来，统一放到一个**全局符号表**。在这一步中链接器能够获取所有输入目标文件的段长度，并且将他们合并，计算出输出文件中各个段合并后的长度与位置，并建立映射关系。
 - 符号解析与重定位
 
-- [ ] to-do：page 125/484，目标文件的各个段，objdump -h ，注意地址对齐
+```shell
+# 在编译a.o和b.o时需要使用-fno-stack-protector选项，否则会导致链接失败
+ts@ts-OptiPlex-7070:~/Downloads/test$ objdump -h a.o
+
+a.o:     file format elf64-x86-64
+
+Sections:
+Idx Name          Size      VMA               LMA               File off  Algn
+  0 .text         0000002c  0000000000000000  0000000000000000  00000040  2**0
+                  CONTENTS, ALLOC, LOAD, RELOC, READONLY, CODE
+  1 .data         00000000  0000000000000000  0000000000000000  0000006c  2**0
+                  CONTENTS, ALLOC, LOAD, DATA
+  2 .bss          00000000  0000000000000000  0000000000000000  0000006c  2**0
+                  ALLOC
+  3 .comment      00000036  0000000000000000  0000000000000000  0000006c  2**0
+                  CONTENTS, READONLY
+  4 .note.GNU-stack 00000000  0000000000000000  0000000000000000  000000a2  2**0
+                  CONTENTS, READONLY
+  5 .eh_frame     00000038  0000000000000000  0000000000000000  000000a8  2**3
+                  CONTENTS, ALLOC, LOAD, RELOC, READONLY, DATA
+ts@ts-OptiPlex-7070:~/Downloads/test$ objdump -h b.o
+
+b.o:     file format elf64-x86-64
+
+Sections:
+Idx Name          Size      VMA               LMA               File off  Algn
+  0 .text         0000004b  0000000000000000  0000000000000000  00000040  2**0
+                  CONTENTS, ALLOC, LOAD, READONLY, CODE
+  1 .data         00000004  0000000000000000  0000000000000000  0000008c  2**2
+                  CONTENTS, ALLOC, LOAD, DATA
+  2 .bss          00000000  0000000000000000  0000000000000000  00000090  2**0
+                  ALLOC
+  3 .comment      00000036  0000000000000000  0000000000000000  00000090  2**0
+                  CONTENTS, READONLY
+  4 .note.GNU-stack 00000000  0000000000000000  0000000000000000  000000c6  2**0
+                  CONTENTS, READONLY
+  5 .eh_frame     00000038  0000000000000000  0000000000000000  000000c8  2**3
+                  CONTENTS, ALLOC, LOAD, RELOC, READONLY, DATA
+ts@ts-OptiPlex-7070:~/Downloads/test$ objdump -h ab
+
+ab:     file format elf64-x86-64
+
+Sections:
+Idx Name          Size      VMA               LMA               File off  Algn
+  0 .text         00000077  00000000004000e8  00000000004000e8  000000e8  2**0
+                  CONTENTS, ALLOC, LOAD, READONLY, CODE
+  1 .eh_frame     00000058  0000000000400160  0000000000400160  00000160  2**3
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+  2 .data         00000004  00000000006001b8  00000000006001b8  000001b8  2**2
+                  CONTENTS, ALLOC, LOAD, DATA
+  3 .comment      00000035  0000000000000000  0000000000000000  000001bc  2**0
+                  CONTENTS, READONLY
+
+```
 
 在链接之前，目标文件中的所有段的VMA都是0，因为虚拟空间还没有被分配，所以他们默认都为0。等到链接之后，可执行文件中的各个段都被分配到了相应的虚拟地址。
-
-在Linux下，ELF可执行文件默认从地址0x08048000开始分配。
 
 ### 符号地址的确定
 
@@ -54,18 +105,88 @@ void swap(int *a, int *b)
 
 ```shell
 # objdump -d a.o
+ts@ts-OptiPlex-7070:~/Downloads/test$ objdump -d a.o
+
+a.o:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+0000000000000000 <main>:
+   0:	55                   	push   %rbp
+   1:	48 89 e5             	mov    %rsp,%rbp
+   4:	48 83 ec 10          	sub    $0x10,%rsp
+   8:	c7 45 fc 64 00 00 00 	movl   $0x64,-0x4(%rbp)
+   f:	48 8d 45 fc          	lea    -0x4(%rbp),%rax
+  13:	be 00 00 00 00       	mov    $0x0,%esi
+  18:	48 89 c7             	mov    %rax,%rdi
+  1b:	b8 00 00 00 00       	mov    $0x0,%eax
+  20:	e8 00 00 00 00       	callq  25 <main+0x25>
+  25:	b8 00 00 00 00       	mov    $0x0,%eax
+  2a:	c9                   	leaveq 
+  2b:	c3                   	retq 
 ```
 
 让我们关注在a.c中引用了shared变量和swap函数，
 
-- `C7 44 24 04 00 00 00 00`：mov指令总共8个字节，它的作用是将shared变量的地址赋值到ESP寄存器+4的偏移地址中去，但在编译阶段编译器并不知道shared和swap的地址，这时候shared变量的地址被假定为0x00000000
-- `E8 FC FF FF FF`：call指令总共5个字节，0xE8是操作码，后四个字节是被调用函数相对于调用指令的下一条指令的偏移量，在没有重定位之前，相对便宜位置被置为0xFFFFFFFC（-4的补码）
+- `be 00 00 00 00`：mov指令总共5个字节，它的作用是将shared变量的地址赋值到ESI寄存器中去，但在编译阶段编译器并不知道shared和swap的地址，这时候shared变量的地址被假定为0x00000000。
+- `e8 00 00 00 00`：call指令总共5个字节，0xe8是操作码，后四个字节是被调用函数相对于调用指令的下一条指令的偏移量，在没有重定位之前，相对偏移位置被置为0x00000000。
 
 ```shell
 # objdump -d ab
+ts@ts-OptiPlex-7070:~/Downloads/test$ objdump -d ab
+
+ab:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+00000000004000e8 <main>:
+  4000e8:	55                   	push   %rbp
+  4000e9:	48 89 e5             	mov    %rsp,%rbp
+  4000ec:	48 83 ec 10          	sub    $0x10,%rsp
+  4000f0:	c7 45 fc 64 00 00 00 	movl   $0x64,-0x4(%rbp)
+  4000f7:	48 8d 45 fc          	lea    -0x4(%rbp),%rax
+  4000fb:	be b8 01 60 00       	mov    $0x6001b8,%esi
+  400100:	48 89 c7             	mov    %rax,%rdi
+  400103:	b8 00 00 00 00       	mov    $0x0,%eax
+  400108:	e8 07 00 00 00       	callq  400114 <swap>
+  40010d:	b8 00 00 00 00       	mov    $0x0,%eax
+  400112:	c9                   	leaveq 
+  400113:	c3                   	retq   
+
+0000000000400114 <swap>:
+  400114:	55                   	push   %rbp
+  400115:	48 89 e5             	mov    %rsp,%rbp
+  400118:	48 89 7d f8          	mov    %rdi,-0x8(%rbp)
+  40011c:	48 89 75 f0          	mov    %rsi,-0x10(%rbp)
+  400120:	48 8b 45 f8          	mov    -0x8(%rbp),%rax
+  400124:	8b 10                	mov    (%rax),%edx
+  400126:	48 8b 45 f0          	mov    -0x10(%rbp),%rax
+  40012a:	8b 00                	mov    (%rax),%eax
+  40012c:	31 c2                	xor    %eax,%edx
+  40012e:	48 8b 45 f8          	mov    -0x8(%rbp),%rax
+  400132:	89 10                	mov    %edx,(%rax)
+  400134:	48 8b 45 f8          	mov    -0x8(%rbp),%rax
+  400138:	8b 10                	mov    (%rax),%edx
+  40013a:	48 8b 45 f0          	mov    -0x10(%rbp),%rax
+  40013e:	8b 00                	mov    (%rax),%eax
+  400140:	31 c2                	xor    %eax,%edx
+  400142:	48 8b 45 f0          	mov    -0x10(%rbp),%rax
+  400146:	89 10                	mov    %edx,(%rax)
+  400148:	48 8b 45 f0          	mov    -0x10(%rbp),%rax
+  40014c:	8b 10                	mov    (%rax),%edx
+  40014e:	48 8b 45 f8          	mov    -0x8(%rbp),%rax
+  400152:	8b 00                	mov    (%rax),%eax
+  400154:	31 c2                	xor    %eax,%edx
+  400156:	48 8b 45 f8          	mov    -0x8(%rbp),%rax
+  40015a:	89 10                	mov    %edx,(%rax)
+  40015c:	90                   	nop
+  40015d:	5d                   	pop    %rbp
+  40015e:	c3                   	retq  
 ```
 
-可以看到shared和地址为0x08049108，swap相对于下一条指令的偏址为0x00000009
+可以看到shared和地址为0x006001b8，swap相对于下一条指令的偏址为0x00000007。
 
 ### 重定位表
 
@@ -83,6 +204,21 @@ objdump -r a.o
 
 ```shell
 # readelf -s a.o
+ts@ts-OptiPlex-7070:~/Downloads/test$ readelf -s a.o
+
+Symbol table '.symtab' contains 11 entries:
+   Num:    Value          Size Type    Bind   Vis      Ndx Name
+     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND 
+     1: 0000000000000000     0 FILE    LOCAL  DEFAULT  ABS a.c
+     2: 0000000000000000     0 SECTION LOCAL  DEFAULT    1 
+     3: 0000000000000000     0 SECTION LOCAL  DEFAULT    3 
+     4: 0000000000000000     0 SECTION LOCAL  DEFAULT    4 
+     5: 0000000000000000     0 SECTION LOCAL  DEFAULT    6 
+     6: 0000000000000000     0 SECTION LOCAL  DEFAULT    7 
+     7: 0000000000000000     0 SECTION LOCAL  DEFAULT    5 
+     8: 0000000000000000    44 FUNC    GLOBAL DEFAULT    1 main
+     9: 0000000000000000     0 NOTYPE  GLOBAL DEFAULT  UND shared
+    10: 0000000000000000     0 NOTYPE  GLOBAL DEFAULT  UND swap
 ```
 
 可以看到a.o中存在两个UND类型的符号，即shared和swap，假如链接器扫描完所有的输入目标文件之后，依然无法在全局符号表中找到这些UND类型的符号，就会报符号未定义错误。
@@ -101,10 +237,30 @@ objdump -r a.o
 
 这里以a.o和ab为例：
 
-- shared绝对寻址修正：S是shared符号的实际地址，即ab中的值0x08049108；A是被修正位置的值，即a.o中的值0x00000000。因此S+A=0x08049108。
-- swap相对寻址修正：S是swap符号的实际地址，即ab中的值0x080480C8；A是a.o中的0xFFFFFFFC（-4）；P为被修正的地址，即swap指令的下一条指令的地址0x08048094+0x27。因此S+A-P=0x00000009。
+```shell
+ts@ts-OptiPlex-7070:~/Downloads/test$ readelf -s ab
 
-绝对寻址修正和相对寻址修正的区别就是绝对寻址修正后的地址为该符号的实际地址；相对寻址修正后的地址为符号距离被修正位置的地址差。
+Symbol table '.symtab' contains 13 entries:
+   Num:    Value          Size Type    Bind   Vis      Ndx Name
+     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND 
+     1: 00000000004000e8     0 SECTION LOCAL  DEFAULT    1 
+     2: 0000000000400160     0 SECTION LOCAL  DEFAULT    2 
+     3: 00000000006001b8     0 SECTION LOCAL  DEFAULT    3 
+     4: 0000000000000000     0 SECTION LOCAL  DEFAULT    4 
+     5: 0000000000000000     0 FILE    LOCAL  DEFAULT  ABS a.c
+     6: 0000000000000000     0 FILE    LOCAL  DEFAULT  ABS b.c
+     7: 0000000000400114    75 FUNC    GLOBAL DEFAULT    1 swap
+     8: 00000000006001b8     4 OBJECT  GLOBAL DEFAULT    3 shared
+     9: 00000000006001bc     0 NOTYPE  GLOBAL DEFAULT    3 __bss_start
+    10: 00000000004000e8    44 FUNC    GLOBAL DEFAULT    1 main
+    11: 00000000006001bc     0 NOTYPE  GLOBAL DEFAULT    3 _edata
+    12: 00000000006001c0     0 NOTYPE  GLOBAL DEFAULT    3 _end
+```
+
+- shared绝对寻址修正：S是shared符号的实际地址，即ab中的值0x006001b8；A是被修正位置的值，即a.o中的值0x00000000。因此S+A=0x006001b8。
+- swap相对寻址修正：S为swap函数的实际地址，即0x00400114。从上面readelf的输出可以看出A=0x00000000，P=0x00400109，按照上述计算方式得出的偏移修正值为S+A-P=0x0000000b，而不是0x00000007。这里和书中的计算其实有些出入，由于A不是书中的-4所以导致计算出的偏移值要比实际值大4个字节，这个应该和我的编译环境有关。**根据call指令的原理：call指令是一条近址相对位移调用指令，它后面跟的是call所调用的指令相对call指令的下一条指令的偏移量，在ab中即为call指令之后的mov指令，mov指令的地址为0x0040010d，因此swap的相对寻址修正值的计算方式可以简单理解为0x00400114-0x0040010d=0x00000007。**
+
+绝对寻址修正和相对寻址修正的区别就是：绝对寻址修正后的地址为该符号的实际地址；相对寻址修正后的地址为符号距离被修正位置的地址差。
 
 ## COMMON块
 
@@ -113,10 +269,11 @@ objdump -r a.o
 在SimpleSection.c中，编译器将未初始化的全局变量定义作为弱符号处理：
 
 ```shell
-# readelf -s global_uninit_var
+# readelf -s SimpleSection.o | grep global_uninit_var
+12: 0000000000000004     4 OBJECT  GLOBAL DEFAULT  COM global_uninit_var
 ```
 
-可以看到他是一个全局的数据对象，他的类型为SHN_COMMON类型。假如另外的目标文件中也定义了global_ubinit_car变量且未初始化，这个变量的类型为double，占8个字节，那么按照COMMON类型的连接机制，最终输出文件中的global_uninit_var变量为占8字节的double类型。
+可以看到他是一个全局的数据对象，他的类型为SHN_COMMON类型,占4个字节。假如另外的目标文件中也定义了global_ubinit_var变量且未初始化，这个变量的类型为double，占8个字节，那么按照COMMON类型的连接机制，最终输出文件中的global_uninit_var变量为占8字节的double类型。
 
 注：直接导致需要COMMON机制的原因是编译器和链接器允许不同类型的弱符号存在，但最本质的原因是链接器不支持符号类型。
 
