@@ -194,13 +194,13 @@ Key to Flags:
 
 ### 文件头
 
-`readelf -h`的输出为ELF Header信息，定义了ELF魔术、文件机器字节长度、数据存储方式、版本、运行平台、ABI版本、ELF重定位类型、硬件平台、硬件平台版本、入口地址、程序头入口和长度、段表的位置和长度及段的数量等。ELF Header结构被定义在`/usr/include/elf.h`中，其中的变量分别对应了上述输出的一条信息，具体可以自行研究，假如不深究细节，readelf输出的信息已经足够用于分析ELF文件结构。
+`readelf -h`的输出为ELF Header信息，定义了ELF魔数、文件机器字节长度、数据存储方式、版本、运行平台、ABI版本、ELF重定位类型、硬件平台、硬件平台版本、入口地址、程序头入口和长度、段表的位置和长度及段的数量等。ELF Header结构被定义在`/usr/include/elf.h`中，其中的变量分别对应了上述输出的一条信息，具体可以自行研究，假如不深究细节，readelf输出的信息已经足够用于分析ELF文件结构。
 
 ### 段表
 
 根据ELF Header的信息，SimpleSection.o有13个段，段表就是记录这些段的基本属性的结构，例如段名、段的长度、在文件中的偏移以及其他属性。
 
-从ELF Header可以看出段表的在SImpleSection.o中的偏移为`0x428`，段表中每个段的长度为64 bytes，总共有13个段，也即Section Table的大小为832bytes，加上offset等于1896 bytes，也即SimpleSection.o的大小。
+从ELF Header可以看出段表的在SimpleSection.o中的偏移为`0x428`，段表中每个段的长度为64 bytes，总共有13个段，也即Section Table的大小为832bytes，加上offset等于1896 bytes，也即SimpleSection.o的大小。
 
 段表的结构比较简单，是一个`Elf_64Shdr`结构体数组，数组个数等于段的个数，每个数组元素对应一个段。
 
@@ -208,7 +208,7 @@ Key to Flags:
 
 根据readelf -s的输出可以确认SimpleSection.o的文件结构如下图所示：
 
-![SimpleSection.o](C:\Users\RicardoLu\Desktop\SimpleSection.o.png)
+![programmer-SimpleSection.o](images/programmer-SimpleSection.o.png)
 
 ### 重定位表
 
